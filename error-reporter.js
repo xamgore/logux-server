@@ -1,22 +1,59 @@
 var reporter = require('./reporter')
+var os = require('os')
 
-function errorHelp (e) {
+function errorHelp (e, app) {
+  var howToFix
+
   switch (e.code) {
-    case 'EADDRINUSE':
+    case 'EADDRINUSE': {
+      howToFix = {
+        win32: [
+          'Run cmd.exe as administrator\n',
+          'C:\\> netstat -a -b -n -o',
+          'C:\\> taskkill /F /PID <processid>'
+        ],
+        linux: [
+          `$ su - root -c 'netstat -nlp | grep ${ e.port }'`,
+          `tcp  0  0.0.0.0:${ e.port }  0.0.0.0:*  LISTEN  777/node`,
+          '$ sudo kill -9 777'
+        ],
+        // macos
+        darwin: [
+          `$ sudo lsof -i ${ e.port }`
+          // TODO: write an explanation
+        ]
+        // TODO: describe 'aix', 'freebsd', 'openbsd', 'sunos'
+      }
+
       return {
-        description: `Port :${ e.port } already in use`,
+        description: `Port :${ e.port } is busy`,
         hint: [
-          'Another Logux server or other app already running on this port',
-          'Maybe you didn’t not stop server from other project',
-          'or previous version of this server was not killed.'
+          'In other words there is a program already listening on the port.',
+          'To fix the issue, you should first find the process, then kill it.'
+        ],
+        solution: howToFix[os.platform()] || ''
+      }
+    }
+
+    case 'EACCES':
+      howToFix = {
+        development: [
+          'Seems that you are in the development mode, use sudo ;)',
+          '$ sudo npm start'
+        ],
+        production: [
+          '$ su - <username>',
+          `$ npm start -p ${ e.port }`
         ]
       }
-    case 'EACCES':
+
       return {
-        description: 'You are not allowed to run server on this port',
+        description: `You are not allowed to run server on port :${ e.port }`,
         hint: [
-          'Try to change user (e.g. root) or use port >= 1024'
-        ]
+          'Non-privileged users can\'t start a listening socket',
+          'on ports below 1024. Try to change user or take another port.'
+        ],
+        solution: howToFix[app.env] || howToFix['production']
       }
     default:
       throw e
@@ -25,9 +62,11 @@ function errorHelp (e) {
 
 module.exports = function errorReporter (err, app) {
   var c = reporter.color(app)
-  var help = errorHelp(err)
+  var help = errorHelp(err, app)
+  var explanation = [].concat('', help.hint, '', help.solution)
+
   return reporter.message([
     reporter.error(c, help.description),
-    reporter.hint(c, help.hint)
+    reporter.hint(c, explanation)
   ])
 }
